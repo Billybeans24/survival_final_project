@@ -1,11 +1,137 @@
 ---
-title: "survival_final_project"
-author: "Chenhui Yan"
-date: "2025-11-12"
-output: html_document
+title: "P8108 Final Project"
+author: "Group 6"
+date: "2025-11-16"
+output: pdf_document
 ---
 
-```{r}
-
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, WARNING = FALSE, MESSAGE = FALSE)
+library(survival)
+library(tidyverse)
+library(gtsummary)
 ```
+
+
+## Data Import
+
+
+```{r}
+lung_df <- survival::lung %>%
+  janitor::clean_names() %>%
+  mutate(
+    inst = as.factor(inst),
+    time = as.numeric(time),
+    status = as.factor(status),
+    event = status == 2,
+    age = as.numeric(age),
+    sex = factor(sex, levels = c(1, 2), labels = c("Male", "Female")),
+    ph_ecog = factor(ph_ecog, ordered = TRUE),
+    ph_karno = as.numeric(ph_karno),
+    pat_karno = as.numeric(pat_karno),
+    meal_cal = as.numeric(meal_cal),
+    wt_loss = as.numeric(wt_loss)
+  )
+```
+We create a new variable called `event` to indicate survival status, where 1 represents death and 0 represents censoring.
+
+The variable `ph_ecog` (ECOG performance score, 0–3) is treated as an ordinal variable. For descriptive and Kaplan–Meier analyses, it is handled as a categorical factor to visualize group differences. It might be modeled as an ordinal numeric variable in Cox model.
+
+## Check NAs
+
+```{r}
+summary(lung_df)
+
+lung_cc <- lung_df %>%
+  filter(complete.cases(time, event, age, sex, ph_ecog,
+                        ph_karno, pat_karno, meal_cal, wt_loss, inst))
+summary(lung_cc)
+```
+
+There are NAs in this data, so we will also create another dataset that observations with missing values will be excluded to ensure that all variables used in the analysis had complete information.
+
+Both the original dataset and the complete-case dataset were retained for further analyses to allow comparisons and sensitivity checks.
+
+## EDA
+
+### Descriptive Table
+
+```{r}
+lung_cc %>%
+  select(time, event, age, sex, ph_ecog, ph_karno, pat_karno, meal_cal, wt_loss) %>%
+  tbl_summary(
+    by = sex,
+    missing = "no",
+    statistic = list(all_continuous() ~ "{mean} ({sd})", all_categorical() ~ "{n} ({p}%)"),
+    label = list(
+      time ~ "Survival time (days)",
+      event ~ "Death indicator",
+      age ~ "Age (years)",
+      ph_ecog ~ "ECOG performance status",
+      ph_karno ~ "Physician Karnofsky score",
+      pat_karno ~ "Patient Karnofsky score",
+      meal_cal ~ "Meal calories",
+      wt_loss ~ "Weight loss (kg)"
+    )
+  ) %>%
+  add_overall() %>%
+  add_p(test = everything() ~ "wilcox.test") %>%
+  bold_labels()
+```
+
+### Age Distribution by Sex
+
+```{r}
+ggplot(lung_cc, aes(x = age, fill = sex)) +
+  geom_histogram(bins = 25, position = "identity", alpha = 0.6) +
+  theme_bw() +
+  labs(title = "Age Distribution by Sex", x = "Age (years)", y = "Count")
+```
+
+### ECOG Performance Status by Sex
+
+```{r}
+ggplot(lung_cc, aes(x = ph_ecog, fill = sex)) +
+  geom_bar(position = "dodge") +
+  theme_bw() +
+  labs(title = "ECOG Performance Status by Sex", x = "ECOG", y = "Count")
+```
+
+### Physician-rated Karnofsky Score by Sex
+
+```{r}
+ggplot(lung_cc, aes(x = ph_karno, fill = sex)) +
+  geom_density(alpha = 0.5) +
+  theme_bw() +
+  labs(title = "Physician-rated Karnofsky Score by Sex", x = "Score", y = "Density")
+```
+
+### Meal Calories and Weight Loss Distributions
+
+```{r}
+p1 <- ggplot(lung_cc, aes(x = meal_cal, fill = sex)) +
+  geom_density(alpha = 0.4) +
+  labs(title = "Meal Calories Distribution", x = "Calories", y = "Density") +
+  theme_bw()
+
+p2 <- ggplot(lung_cc, aes(x = wt_loss, fill = sex)) +
+  geom_density(alpha = 0.4) +
+  labs(title = "Weight Loss Distribution", x = "Weight loss (kg)", y = "Density") +
+  theme_bw()
+
+p1; p2
+```
+
+
+### Distribution of Survival Time
+
+```{r}
+ggplot(lung_cc, aes(x = time, fill = event)) +
+  geom_histogram(bins = 30, alpha = 0.6) +
+  theme_bw() +
+  labs(title = "Distribution of Survival Time", x = "Time (days)", y = "Count") +
+  scale_fill_manual(values = c("PINK", "RED"), name = "Event", labels = c("Censored", "Death"))
+```
+
+
 
