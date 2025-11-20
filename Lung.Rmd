@@ -10,6 +10,8 @@ knitr::opts_chunk$set(echo = TRUE, WARNING = FALSE, MESSAGE = FALSE)
 library(survival)
 library(tidyverse)
 library(gtsummary)
+library(survminer)
+library(survMisc)
 ```
 
 
@@ -134,4 +136,125 @@ ggplot(lung_cc, aes(x = time, fill = event)) +
 ```
 
 
+## Comparison of Survival Curves
 
+```{r}
+# Create a survival object, which bundles the time and event data
+surv_object <- Surv(time = lung_cc$time, event = lung_cc$event)
+```
+
+### Sex
+```{r}
+# Fit the Kaplan-Meier model to estimate survival curves for each group ('sex')
+km_sex_fit <- survfit(surv_object ~ sex, data = lung_cc)
+
+summary(km_sex_fit)
+
+
+# --- Visualize the Estimated Survival Probabilities ---
+
+# Generate the Kaplan-Meier plot using ggsurvplot
+ggsurvplot(
+  km_sex_fit,
+  data = lung_cc,
+  pval = TRUE,                 # The p-value from the log-rank test will be displayed
+  conf.int = TRUE,             # Display confidence intervals for the curves
+  risk.table = TRUE,           # Add a table showing the number of subjects at risk
+  risk.table.col = "strata",   # Color the risk table to match the curves
+  legend.labs = c("Male", "Female"),
+  legend.title = "Sex",
+  xlab = "Time in Days",
+  ylab = "Survival Probability",
+  title = "Kaplan-Meier Survival Curves by Sex",
+  ggtheme = theme_bw()         # Apply a clean theme
+)
+
+```
+
+```{r}
+# With rho = 0 this is the log-rank or Mantel-Haenszel test, and with rho = 1 it is equivalent to the Peto & Peto modification of the Gehan-Wilcoxon test.
+log_rank_sex <- survdiff(surv_object ~ sex, data = lung_cc, rho = 0)
+print(log_rank_sex)
+
+wilcoxon_sex <- survdiff(surv_object ~ sex, data = lung_cc, rho = 1)
+print(wilcoxon_sex)
+
+```
+
+The p-value is even smaller than the log-rank p-value. This not only confirms the result of the log-rank test but also suggests that the survival advantage for females is particularly pronounced at the beginning and middle of the follow-up period.
+
+```{r}
+# Fleming-Harrington test statistic
+fit_sex <- ten(surv_object ~ sex, data = lung_cc)
+comp(fit_sex)
+
+lrt_mat <- attr(fit_sex, "lrt")
+data.frame(
+test = c("Log-Rank", "Wilcoxon", "Tarone", "Peto", "Modified-Peto", "FH(1, 1)"),
+Z_squared = lrt_mat[, "Z"]^2
+)
+
+```
+
+The final summary table (Z_squared) shows that regardless of the specific test used, the result is always highly significant (all Z^2 values correspond to p-values well below 0.05). 
+
+### ECOG performance status (unstratified)
+```{r}
+# --- Fit the Kaplan-Meier model for ph_ecog ---
+km_ecog_fit <- survfit(surv_object ~ ph_ecog, data = lung_cc)
+
+summary(km_ecog_fit)
+
+ggsurvplot(
+  km_ecog_fit,
+  data = lung_cc,
+  
+  # --- Add Key Statistical Information ---
+  pval = TRUE,                 # Display the log-rank test p-value
+  conf.int = TRUE,             # Show 95% confidence intervals
+  
+  # --- Add Contextual Information ---
+  risk.table = TRUE,           # Include a table showing the number of patients at risk
+  risk.table.y.text.col = TRUE,# Color the risk table text to match curves
+  risk.table.y.text = FALSE,   # Remove y-axis tick labels from the risk table
+  
+  # --- Customize Aesthetics and Labels ---
+  title = "Kaplan-Meier Survival Curves by ECOG Performance Status",
+  xlab = "Time in Days",
+  ylab = "Survival Probability",
+  legend.title = "ECOG Status",
+  # Provide clear, descriptive labels for each group in the legend
+  legend.labs = c(
+    "0 (Asymptomatic)", 
+    "1 (Symptomatic, Ambulatory)", 
+    "2 (In bed <50% of day)", 
+    "3 (In bed >50% of day)"
+  ),
+  ggtheme = theme_bw()         # Use a clean black and white theme
+)
+
+# --- Perform the test ---
+log_rank_ecog <- survdiff(surv_object ~ ph_ecog, data = lung_cc, rho = 0)
+print(log_rank_ecog)
+
+wilcoxon_ecog <- survdiff(surv_object ~ ph_ecog, data = lung_cc, rho = 1)
+print(wilcoxon_ecog)
+```
+
+The fact that the Wilcoxon test yields a smaller p-value than the log-rank test suggests that the survival differences between the groups are particularly pronounced early in the follow-up period. 
+
+### ECOG performance status (stratified by sex)
+```{r}
+log_rank_ecog_bysex <- survdiff(surv_object ~ ph_ecog + strata(sex), data = lung_cc, rho = 0)
+print(log_rank_ecog_bysex)
+
+wilcoxon_ecog_bysex <- survdiff(surv_object ~ ph_ecog + strata(sex), data = lung_cc, rho = 1)
+print(wilcoxon_ecog_bysex)
+```
+
+Log-rank: The result is virtually identical to the unstratified test. The Chi-square statistic and the p-value have barely changed. It means that the strong predictive power of ECOG status is independent of the patient's sex. The effect is not being confounded by sex.
+
+Wilcoxon: After stratifying by sex, the Chi-square value increased (from 20.8 to 23.4) and the p-value became even smaller. This suggests that after controlling for the baseline survival differences between sexes, the effect of ECOG status on early deaths becomes even more pronounced and clear.
+
+Final summary for stratified analysis:
+ECOG is an Independent Predictor: The effect of ECOG performance status on survival is not explained away by the patient's sex. It is a strong, independent prognostic factor. Sex is not acting as a major confounder in the relationship between ECOG status and survival. Whether a patient is male or female, having a worse ECOG score (e.g., a score of 2 vs. 0) is strongly associated with a significantly poorer survival outcome. The effect holds true within both groups.
