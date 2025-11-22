@@ -141,6 +141,28 @@ ggplot(lung_cc, aes(x = time, fill = event)) +
 ```{r}
 # Create a survival object, which bundles the time and event data
 surv_object <- Surv(time = lung_cc$time, event = lung_cc$event)
+
+```
+
+```{r}
+# Fit the Overall Kaplan-Meier Model
+km_overall_fit <- survfit(surv_object ~ 1, data = lung_cc)
+
+print(km_overall_fit)
+
+ggsurvplot(
+  km_overall_fit,
+  data = lung_cc,
+  conf.int = TRUE,    
+  risk.table = TRUE,   
+  risk.table.col = "strata", 
+  title = "Overall Kaplan-Meier Survival Curve",
+  xlab = "Time in Days",
+  ylab = "Survival Probability",
+  ggtheme = theme_bw(),  
+  palette = "darkblue",  
+  legend = "none"      
+)
 ```
 
 ### Sex
