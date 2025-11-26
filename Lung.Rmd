@@ -233,7 +233,7 @@ ggsurvplot(
   
   # --- Add Key Statistical Information ---
   pval = TRUE,                 # Display the log-rank test p-value
-  conf.int = TRUE,             # Show 95% confidence intervals
+  conf.int = FALSE,             # Show 95% confidence intervals
   
   # --- Add Contextual Information ---
   risk.table = TRUE,           # Include a table showing the number of patients at risk
@@ -280,3 +280,183 @@ Wilcoxon: After stratifying by sex, the Chi-square value increased (from 20.8 to
 
 Final summary for stratified analysis:
 ECOG is an Independent Predictor: The effect of ECOG performance status on survival is not explained away by the patient's sex. It is a strong, independent prognostic factor. Sex is not acting as a major confounder in the relationship between ECOG status and survival. Whether a patient is male or female, having a worse ECOG score (e.g., a score of 2 vs. 0) is strongly associated with a significantly poorer survival outcome. The effect holds true within both groups.
+
+
+### Univariate Cox Regression (Single-variable screening)
+```{r}
+# List of all predictor variables to test
+predictors <- c("age", "sex", "ph_ecog", "ph_karno", "pat_karno", "meal_cal", "wt_loss")
+
+# Create an empty list to store results
+univariate_results <- list()
+
+# Loop through each predictor and fit a univariate Cox model
+for (var in predictors) {
+  formula <- as.formula(paste("Surv(time, event) ~", var))
+  cox_model <- coxph(formula, data = lung_cc)
+  
+  # Extract coefficients, HR, CI, and p-value
+  summary_model <- summary(cox_model)
+  
+  univariate_results[[var]] <- data.frame(
+    Variable = var,
+    HR = summary_model$conf.int[1, "exp(coef)"],
+    Lower_CI = summary_model$conf.int[1, "lower .95"],
+    Upper_CI = summary_model$conf.int[1, "upper .95"],
+    P_value = summary_model$coefficients[1, "Pr(>|z|)"]
+  )
+}
+
+# Combine all results into one table
+univariate_table <- do.call(rbind, univariate_results)
+rownames(univariate_table) <- NULL
+
+# Display the table
+print(univariate_table)
+
+# Create a more detailed summary table using gtsummary
+tbl_univariate <- 
+  tbl_uvregression(
+    lung_cc %>% select(time, event, age, sex, ph_ecog, ph_karno, pat_karno, meal_cal, wt_loss),
+    method = coxph,
+    y = Surv(time, event),
+    exponentiate = TRUE,
+    pvalue_fun = ~style_pvalue(.x, digits = 3)
+  ) %>%
+  bold_p(t = 0.05) %>%
+  bold_labels()
+
+tbl_univariate
+```
+In univariable Cox models, female sex was associated with a substantially lower hazard of death compared with males (HR 0.62, 95% CI 0.42–0.91, p=0.015). Worse ECOG performance status showed a significant linear trend toward higher mortality risk (p for linear trend = 0.024). Higher patient-rated Karnofsky score was strongly protective (HR 0.98 per point, 95% CI 0.97–0.99, p=0.002). Age and physician-rated Karnofsky score exhibited borderline associations with survival, whereas meal calories and weight loss were not significantly associated with overall survival in univariable analyses
+
+### Variable Selection
+```{r}
+significant_vars <- univariate_table %>%
+  filter(P_value < 0.10) %>%
+  pull(Variable)
+
+print("Variables selected for multivariable model (p < 0.10):")
+print(significant_vars)
+
+```
+Covariates with p < 0.10 in univariable Cox models were considered as candidates for the multivariable model. Given the strong clinical relevance, age and sex were retained a priori. Because physician- and patient-rated Karnofsky scores are highly correlated, we included only the patient-rated score (pat_karno), which showed a stronger univariable association (p=0.002), in the primary model.
+
+### Multivariable Cox Regression (Initial Model)
+```{r}
+cox_multi_model <- coxph(Surv(time, event) ~ age + sex + ph_ecog + pat_karno, 
+                         data = lung_cc)
+
+summary(cox_multi_model)
+```
+In the initial multivariable Cox model including age, sex, ECOG performance status, and patient-rated Karnofsky score, the overall model was statistically significant (likelihood ratio test p = 0.002), with a concordance index of 0.65, indicating moderate discriminative ability. After adjustment for the other covariates, female patients had a substantially lower hazard of death compared with males (HR 0.62, 95% CI 0.42–0.91, p = 0.015). ECOG performance status showed a borderline linear trend toward higher mortality (HR 3.76 for a one-step worsening in ECOG, 95% CI 0.93–15.19, p = 0.063). In contrast, age and patient-rated Karnofsky score were not significantly associated with survival in this multivariable model (all p > 0.40).
+
+### Tied Events Handling + Model Simplification
+```{r}
+cox_multi_efron <- coxph(
+  Surv(time, event) ~ age + sex + ph_ecog + pat_karno,
+  data = lung_cc,
+  ties = "efron"
+)
+
+cox_multi_breslow <- coxph(
+  Surv(time, event) ~ age + sex + ph_ecog + pat_karno,
+  data = lung_cc,
+  ties = "breslow"
+)
+
+summary(cox_multi_efron)
+summary(cox_multi_breslow)
+
+```
+To assess the impact of tied event times, we refit the multivariable Cox model using both the Efron and Breslow methods for handling ties. The estimated hazard ratios, confidence intervals, and p-values were nearly identical across the two approaches, and the concordance index remained 0.65 in both models. These findings suggest that ties had minimal influence on the results, and we therefore used the Efron method in all subsequent analyses.
+
+### Model Simplification
+```{r}
+# Remove non-significant variables (age, pat_karno)
+# Test 3 simplified models
+
+# Model A: Sex only (most parsimonious)
+cox_model_A <- coxph(Surv(time, event) ~ sex, data = lung_cc)
+
+# Model B: Sex + ph_ecog (categorical)
+cox_model_B <- coxph(Surv(time, event) ~ sex + ph_ecog, data = lung_cc)
+
+# Model C: Sex + ph_ecog (as numeric/ordinal)
+lung_cc <- lung_cc %>%
+  mutate(ph_ecog_num = as.numeric(as.character(ph_ecog)))
+
+cox_model_C <- coxph(Surv(time, event) ~ sex + ph_ecog_num, data = lung_cc)
+
+# Display all models
+cat("========================================\n")
+cat("Model A: Sex Only\n")
+cat("========================================\n")
+summary(cox_model_A)
+
+cat("\n========================================\n")
+cat("Model B: Sex + ECOG (Categorical)\n")
+cat("========================================\n")
+summary(cox_model_B)
+
+cat("\n========================================\n")
+cat("Model C: Sex + ECOG (Numeric)\n")
+cat("========================================\n")
+summary(cox_model_C)
+
+# Model comparison
+cat("\n========================================\n")
+cat("MODEL COMPARISON SUMMARY\n")
+cat("========================================\n")
+
+# Extract metrics
+aic_A <- AIC(cox_model_A)
+aic_B <- AIC(cox_model_B)
+aic_C <- AIC(cox_model_C)
+
+c_A <- summary(cox_model_A)$concordance[1]
+c_B <- summary(cox_model_B)$concordance[1]
+c_C <- summary(cox_model_C)$concordance[1]
+
+cat("\nModel A (sex only):\n")
+cat("  AIC =", round(aic_A, 2), "\n")
+cat("  C-index =", round(c_A, 3), "\n")
+
+cat("\nModel B (sex + ph_ecog categorical):\n")
+cat("  AIC =", round(aic_B, 2), "\n")
+cat("  C-index =", round(c_B, 3), "\n")
+
+cat("\nModel C (sex + ph_ecog numeric):\n")
+cat("  AIC =", round(aic_C, 2), "\n")
+cat("  C-index =", round(c_C, 3), "\n")
+
+cat("\nNote: Lower AIC = Better fit\n")
+cat("      Higher C-index = Better discrimination\n")
+
+# Likelihood Ratio Tests
+cat("\n========================================\n")
+cat("LIKELIHOOD RATIO TESTS\n")
+cat("========================================\n")
+
+cat("\n--- Test 1: Model A vs Model B ---\n")
+cat("(Does adding ph_ecog categorical improve the model?)\n")
+lrt_AB <- anova(cox_model_A, cox_model_B, test = "Chisq")
+print(lrt_AB)
+
+cat("\n--- Test 2: Model A vs Model C ---\n")
+cat("(Does adding ph_ecog numeric improve the model?)\n")
+lrt_AC <- anova(cox_model_A, cox_model_C, test = "Chisq")
+print(lrt_AC)
+
+cat("\n--- Test 3: Model B vs Model C ---\n")
+cat("(Is categorical or numeric ph_ecog better?)\n")
+lrt_BC <- anova(cox_model_C, cox_model_B, test = "Chisq")
+print(lrt_BC)
+```
+
+Starting from a multivariable model including age, sex, ECOG performance status, and patient-rated Karnofsky score, we removed age (p=0.565) and patient-rated Karnofsky score (p=0.431) as they were not statistically significant after adjustment for other covariates. We then compared three 
+reduced Cox models: (A) sex only, (B) sex plus ECOG treated as a categorical factor, and (C) sex plus ECOG treated as a numeric ordinal variable (0–3).
+
+Adding ECOG status substantially improved model fit compared with the sex-only model. For model B, the likelihood ratio test versus model A yielded $\chi^2$=14.14 on 3 df (p=0.003), with concordance increasing from 0.567 to 0.646. For model C, the likelihood ratio test versus model A yielded $\chi^2$=13.24 on 1 df (p<0.001), with concordance of 0.641. Models B and C demonstrated similar performance (AIC=1003.84 vs 1000.75; C-index=0.646 vs 0.641), with no significant difference between them ($\chi^2$=0.91 on 2 df, p=0.635). 
+
+We selected model C (sex + ECOG as a numeric ordinal variable) as the final Cox model based on the principle of parsimony: it achieved similar predictive performance with fewer parameters (2 vs 4) and offered a simpler, more interpretable linear effect for ECOG performance status.
