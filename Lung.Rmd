@@ -460,3 +460,16 @@ reduced Cox models: (A) sex only, (B) sex plus ECOG treated as a categorical fac
 Adding ECOG status substantially improved model fit compared with the sex-only model. For model B, the likelihood ratio test versus model A yielded $\chi^2$=14.14 on 3 df (p=0.003), with concordance increasing from 0.567 to 0.646. For model C, the likelihood ratio test versus model A yielded $\chi^2$=13.24 on 1 df (p<0.001), with concordance of 0.641. Models B and C demonstrated similar performance (AIC=1003.84 vs 1000.75; C-index=0.646 vs 0.641), with no significant difference between them ($\chi^2$=0.91 on 2 df, p=0.635). 
 
 We selected model C (sex + ECOG as a numeric ordinal variable) as the final Cox model based on the principle of parsimony: it achieved similar predictive performance with fewer parameters (2 vs 4) and offered a simpler, more interpretable linear effect for ECOG performance status.
+
+### Check assumptions
+```{r}
+ph_test = cox.zph(cox_model_C)
+ph_test
+```
+
+```{r}
+par(mfrow = c(1,2))
+plot(ph_test)
+par(mfrow = c(1,1))
+```
+The proportional hazards assumption was evaluated using Schoenfeld residuals. The effect of sex met the PH assumption (p = 0.266), with residual plots showing no meaningful time trend. However, ph_ecog_num showed a statistically significant deviation from proportional hazards (p = 0.022), and its residual plot displayed a clear time-varying pattern. The global test was also statistically significant (p = 0.045), further indicating model-level violation of the PH assumption. These findings suggest that the effect of ECOG performance status may vary over time, and the current Cox model may not fully satisfy the PH assumption. Thus, we might considering remove the ECOG variable, and only include sex into our final survival model.
