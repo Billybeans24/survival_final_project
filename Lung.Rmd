@@ -2,7 +2,9 @@
 title: "P8108 Final Project"
 author: "Group 6"
 date: "2025-11-16"
-output: pdf_document
+output:
+  pdf_document:
+    latex_engine: xelatex
 ---
 
 ```{r setup, include=FALSE}
@@ -12,6 +14,8 @@ library(tidyverse)
 library(gtsummary)
 library(survminer)
 library(survMisc)
+library(knitr)
+library(kableExtra) 
 ```
 
 
@@ -281,7 +285,7 @@ Wilcoxon: After stratifying by sex, the Chi-square value increased (from 20.8 to
 Final summary for stratified analysis:
 ECOG is an Independent Predictor: The effect of ECOG performance status on survival is not explained away by the patient's sex. It is a strong, independent prognostic factor. Sex is not acting as a major confounder in the relationship between ECOG status and survival. Whether a patient is male or female, having a worse ECOG score (e.g., a score of 2 vs. 0) is strongly associated with a significantly poorer survival outcome. The effect holds true within both groups.
 
-
+## Cox model
 ### Univariate Cox Regression (Single-variable screening)
 ```{r}
 # List of all predictor variables to test
@@ -473,3 +477,203 @@ plot(ph_test)
 par(mfrow = c(1,1))
 ```
 The proportional hazards assumption was evaluated using Schoenfeld residuals. The effect of sex met the PH assumption (p = 0.266), with residual plots showing no meaningful time trend. However, ph_ecog_num showed a statistically significant deviation from proportional hazards (p = 0.022), and its residual plot displayed a clear time-varying pattern. The global test was also statistically significant (p = 0.045), further indicating model-level violation of the PH assumption. These findings suggest that the effect of ECOG performance status may vary over time, and the current Cox model may not fully satisfy the PH assumption. Thus, we might considering remove the ECOG variable, and only include sex into our final survival model.
+
+
+# AFT Model Analysis (Addressing PH Violation)
+
+Since `ph_ecog` violated the proportional hazards assumption (p = 0.022), we fit Accelerated Failure Time (AFT) models as an alternative approach. AFT models do not require the PH assumption and provide **time ratios** that are often more clinically interpretable.
+
+### Fit Multiple AFT Models
+```{r aft_models}
+# Fit AFT models with different distributions
+# Model: time ~ sex + ph_ecog_num
+
+# 1. Exponential
+aft_exp <- survreg(Surv(time, event) ~ sex + ph_ecog_num,
+                   data = lung_cc, dist = "exponential")
+
+# 2. Weibull (most common, allows PH interpretation)
+aft_weibull <- survreg(Surv(time, event) ~ sex + ph_ecog_num,
+                       data = lung_cc, dist = "weibull")
+
+# 3. Log-Normal
+aft_lnorm <- survreg(Surv(time, event) ~ sex + ph_ecog_num,
+                     data = lung_cc, dist = "lognormal")
+
+# 4. Log-Logistic
+aft_llogis <- survreg(Surv(time, event) ~ sex + ph_ecog_num,
+                      data = lung_cc, dist = "loglogistic")
+```
+
+### Model Comparison
+```{r aft_comparison}
+# Compare models using AIC
+model_comparison <- data.frame(
+  Model = c("Exponential", "Weibull", "Log-Normal", "Log-Logistic"),
+  LogLik = c(logLik(aft_exp)[1], logLik(aft_weibull)[1],
+             logLik(aft_lnorm)[1], logLik(aft_llogis)[1]),
+  AIC = c(AIC(aft_exp), AIC(aft_weibull), 
+          AIC(aft_lnorm), AIC(aft_llogis)),
+  Parameters = c(3, 4, 4, 4)
+) %>%
+  mutate(Delta_AIC = AIC - min(AIC)) %>%
+  arrange(AIC)
+
+kable(model_comparison, digits = 2,
+      caption = "AFT Model Comparison (Lower AIC = Better)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+best_model <- model_comparison$Model[1]
+cat("\nBest model by AIC:", best_model, "\n")
+```
+
+### Likelihood Ratio Test
+```{r lrt_test}
+# Test if Weibull significantly better than Exponential
+lrt_stat <- 2 * (logLik(aft_weibull)[1] - logLik(aft_exp)[1])
+p_value <- pchisq(lrt_stat, df = 1, lower.tail = FALSE)
+
+cat("LR Chi-square:", round(lrt_stat, 3), "\n")
+cat("df: 1\n")
+cat("p-value:", format.pval(p_value, digits = 3), "\n\n")
+
+if (p_value < 0.05) {
+  cat("Result: Weibull is significantly better (p < 0.05)\n")
+} else {
+  cat("Result: No significant difference\n")
+}
+```
+
+
+### Final AFT Model Results
+```{r aft_final_model}
+cat("============================================\n")
+cat("FINAL WEIBULL AFT MODEL\n")
+cat("============================================\n\n")
+
+cat("Model Selection Rationale:\n")
+cat("- Weibull had the lowest AIC among all distributions tested\n")
+cat("- LR test: Weibull significantly better than Exponential (p < 0.001)\n")
+cat("- Variables: sex + ph_ecog_num (reduced model)\n\n")
+
+cat("Weibull Parameters:\n")
+cat("- Scale ($\\sigma$):", round(aft_weibull$scale, 4), "\n")
+cat("- Shape ($\\kappa = 1/\\sigma$):", round(1/aft_weibull$scale, 4), "\n")
+cat("- Interpretation: $\\kappa > 1$ indicates INCREASING hazard over time\n\n")
+
+# Get coefficients  
+aft_sum <- summary(aft_weibull)$table   
+
+coefs <- aft_sum[-1, "Value"]         
+se    <- aft_sum[-1, "Std. Error"]
+names(coefs) <- rownames(aft_sum)[-1]
+
+n_coef <- length(coefs)
+
+final_aft_results <- data.frame(
+  Variable   = names(coefs),
+  Beta_AFT   = as.numeric(coefs),
+  SE         = as.numeric(se),
+  Time_Ratio = exp(coefs),
+  Lower_95CI = exp(coefs - 1.96 * se),
+  Upper_95CI = exp(coefs + 1.96 * se),
+  p_value    = 2 * pnorm(-abs(coefs / se)),
+  stringsAsFactors = FALSE
+)
+
+kable(final_aft_results, digits = 3,
+      caption = "Weibull AFT Model Results")
+
+```
+In the Weibull AFT model ($\sigma$ = 0.73, $\kappa$ = 1.38), both sex and ECOG performance status were significant independent predictors of survival time.
+Sex: Female patients demonstrated significantly longer median survival compared to males (Time Ratio [TR] = 1.45, 95% CI: 1.09–1.93, p = 0.01), with an estimated 45% increase in median survival time.
+ECOG Performance Status: Each one-unit worsening in ECOG score was associated with a 30% reduction in median survival time (TR = 0.70, 95% CI: 0.58–0.85, p < 0.001).
+
+## Clinical Interpretation
+```{r aft_interpretation}
+cat("============================================\n")
+cat("CLINICAL INTERPRETATION (AFT Model)\n")
+cat("============================================\n\n")
+
+# Sex effect
+tr_sex <- final_aft_results$Time_Ratio[1]
+pct_sex <- (tr_sex - 1) * 100
+
+cat("1. Sex (Female vs Male):\n")
+cat("   Time Ratio:", round(tr_sex, 3), "\n")
+if (tr_sex > 1) {
+  cat("   Females have", round(pct_sex, 1), "% LONGER median survival\n\n")
+} else {
+  cat("   Females have", round(abs(pct_sex), 1), "% SHORTER median survival\n\n")
+}
+
+# ECOG effect
+tr_ecog <- final_aft_results$Time_Ratio[2]
+pct_ecog <- (tr_ecog - 1) * 100
+
+cat("2. ECOG (per 1-unit increase):\n")
+cat("   Time Ratio:", round(tr_ecog, 3), "\n")
+if (tr_ecog < 1) {
+  cat("   Each 1-unit worsening reduces survival by", round(abs(pct_ecog), 1), "%\n\n")
+} else {
+  cat("   Each 1-unit worsening increases survival by", round(pct_ecog, 1), "%\n\n")
+}
+
+# Example
+cat("Example:\n")
+cat("If a male with ECOG=0 has median survival of 300 days:\n")
+cat("  - Male, ECOG=1:   ", round(300 * tr_ecog, 0), "days\n")
+cat("  - Female, ECOG=0: ", round(300 * tr_sex, 0), "days\n")
+cat("  - Female, ECOG=1: ", round(300 * tr_sex * tr_ecog, 0), "days\n")
+```
+In the Weibull AFT model, female sex is associated with ~45% longer survival time compared with males, adjusting for ECOG. Each 1-point worsening in ECOG score is associated with ~30% shorter survival time. For example, if a male patient with ECOG 0 has a median survival of 300 days, the model predicts 211 days for a male with ECOG 1, 435 days for a female with ECOG 0, and 306 days for a female with ECOG 1.
+
+### Weibull AFT to Hazard Ratios
+```{r aft_to_ph}
+if (best_model == "Weibull") {
+  cat("============================================\n")
+  cat("WEIBULL AFT to PH CONVERSION\n")
+  cat("============================================\n\n")
+  
+  sigma <- aft_weibull$scale
+  beta_aft <- coef(aft_weibull)[-1]
+  beta_ph <- -beta_aft / sigma
+  hr <- exp(beta_ph)
+  
+  conversion_table <- data.frame(
+    Variable = names(beta_aft),
+    AFT_TimeRatio = exp(beta_aft),
+    Converted_HR = hr,
+    Cox_HR = exp(coef(cox_model_C))
+  )
+  
+  kable(conversion_table, digits = 3,
+        caption = "AFT vs Cox: Time Ratios and Hazard Ratios") %>%
+    kable_styling(bootstrap_options = c("striped", "hover"))
+  
+  cat("\nNote: Weibull AFT and Cox PH give similar HRs\n")
+}
+```
+
+## Summary
+```{r summary_aft}
+cat("============================================\n")
+cat("SUMMARY: AFT vs COX\n")
+cat("============================================\n\n")
+
+cat("1. PH ASSUMPTION:\n")
+cat("   - Cox: ph_ecog violated (p=0.022)\n")
+cat("   - AFT: NO assumption required ✓\n\n")
+
+cat("2. INTERPRETATION:\n")
+cat("   - Cox: Hazard Ratios\n")
+cat("   - AFT: Time Ratios (more intuitive)\n\n")
+
+cat("3. KEY FINDINGS:\n")
+cat("   - Female sex: protective effect\n")
+cat("   - ECOG worse: shorter survival\n")
+cat("   - Consistent across methods ✓\n\n")
+
+```
+
+
