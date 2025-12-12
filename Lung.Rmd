@@ -226,6 +226,15 @@ Z_squared = lrt_mat[, "Z"]^2
 
 The final summary table (Z_squared) shows that regardless of the specific test used, the result is always highly significant (all Z^2 values correspond to p-values well below 0.05). 
 
+```{r}
+# stratified by ecog
+log_rank_sex_byecog <- survdiff(surv_object ~ sex + strata(ph_ecog), data = lung_cc, rho = 0)
+print(log_rank_sex_byecog)
+
+wilcoxon_sex_byecog <- survdiff(surv_object ~ sex + strata(ph_ecog), data = lung_cc, rho = 1)
+print(wilcoxon_sex_byecog)
+```
+
 ### ECOG performance status (unstratified)
 ```{r}
 # --- Fit the Kaplan-Meier model for ph_ecog ---
