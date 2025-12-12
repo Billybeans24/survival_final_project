@@ -77,7 +77,7 @@ lung_cc %>%
       ph_karno ~ "Physician Karnofsky score",
       pat_karno ~ "Patient Karnofsky score",
       meal_cal ~ "Meal calories",
-      wt_loss ~ "Weight loss (kg)"
+      wt_loss ~ "Weight loss (pounds)"
     )
   ) %>%
   add_overall() %>%
