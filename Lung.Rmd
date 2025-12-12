@@ -176,6 +176,8 @@ km_sex_fit <- survfit(surv_object ~ sex, data = lung_cc)
 
 summary(km_sex_fit)
 
+print(km_sex_fit)
+
 
 # --- Visualize the Estimated Survival Probabilities ---
 
@@ -230,6 +232,8 @@ The final summary table (Z_squared) shows that regardless of the specific test u
 km_ecog_fit <- survfit(surv_object ~ ph_ecog, data = lung_cc)
 
 summary(km_ecog_fit)
+
+print(km_ecog_fit)
 
 ggsurvplot(
   km_ecog_fit,
