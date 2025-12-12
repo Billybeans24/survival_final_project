@@ -486,6 +486,35 @@ The proportional hazards assumption was evaluated using Schoenfeld residuals. Th
 # AFT Model Analysis (Addressing PH Violation)
 
 Since `ph_ecog` violated the proportional hazards assumption (p = 0.022), we fit Accelerated Failure Time (AFT) models as an alternative approach. AFT models do not require the PH assumption and provide **time ratios** that are often more clinically interpretable.
+```{r}
+# ===================================
+# Variable Selection for AFT Models (using Weibull as reference)
+# ===================================
+# We use Weibull for initial variable selection because it's most commonly used
+
+# Full model
+aft_full_weibull <- survreg(Surv(time, event) ~ sex + age + ph_ecog_num + 
+                             ph_karno + pat_karno + meal_cal + wt_loss,
+                             data = lung_cc, dist = "weibull")
+summary(aft_full_weibull)
+
+
+# Check collinearity
+cor(lung_cc[, c("ph_ecog_num", "ph_karno")], use = "complete.obs")
+
+
+# Compare models
+aft_with_karno <- survreg(Surv(time, event) ~ sex + ph_ecog_num + ph_karno,
+                          data = lung_cc, dist = "weibull")
+aft_reduced <- survreg(Surv(time, event) ~ sex + ph_ecog_num,
+                       data = lung_cc, dist = "weibull")
+
+# LRT and AIC
+anova(aft_reduced, aft_with_karno)  
+
+```
+Although ph_karno was significant in the full model (p=0.030), the likelihood ratio test shows that adding it to a model already containing sex and ph_ecog does not significantly improve model fit (p=0.071 > 0.05). This, combined with the high collinearity between ph_ecog and ph_karno (r=-0.82) and minimal AIC difference (Δ=1.27), indicates that ph_karno does not provide meaningful additional information beyond what ph_ecog already captures. Therefore, we select the more parsimonious reduced model with only sex and ph_ecog_num as predictors. This decision is further supported by the fact that ph_ecog has a stronger effect (p=0.001 vs p=0.030) and is more widely used in clinical practice.
+
 
 ### Fit Multiple AFT Models
 ```{r aft_models}
